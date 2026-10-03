@@ -74,8 +74,8 @@ def get_candles(symbol, limit=100):
     """
     Mengambil candle Spot Bitget.
 
-    Weekly:
-        1week
+    Daily:
+        1day
 
     Response:
         [
@@ -93,7 +93,7 @@ def get_candles(symbol, limit=100):
 
     params = {
         "symbol": symbol,
-        "granularity": "1week",
+        "granularity": "1day",
         "limit": str(limit)
     }
 
@@ -155,13 +155,13 @@ def get_candles(symbol, limit=100):
 
 
 # ============================================================
-# FILTER CANDLE WEEKLY YANG SUDAH CLOSE
+# FILTER CANDLE DAILY YANG SUDAH CLOSE
 # ============================================================
 
 def remove_open_candle(candles):
     """
-    Candle weekly terakhir bisa masih berjalan.
-    Candle weekly = 7 hari.
+    Candle daily terakhir bisa masih berjalan.
+    Candle daily = 1 hari.
 
     Jika candle terakhir belum selesai, buang.
     """
@@ -173,7 +173,7 @@ def remove_open_candle(candles):
 
     last = candles[-1]
 
-    week_ms = 7 * 24 * 60 * 60 * 1000
+    day_ms = 24 * 60 * 60 * 1000
 
     candle_end = last["timestamp"] + week_ms
 
@@ -417,7 +417,7 @@ def analyze(candles, config):
 
     # ========================================================
     # CONDITION 4
-    # WEEKLY CANDLE
+    # DAILY CANDLE
     # ========================================================
 
     candle_bullish = (
@@ -429,7 +429,7 @@ def analyze(candles, config):
 
     conditions.append(
         (
-            "Weekly candle",
+            "Daily candle",
             candle_bullish,
             "Bullish"
             if candle_bullish
@@ -603,7 +603,7 @@ def print_result(symbol, analysis, messages):
 
     print()
     print("═" * 50)
-    print(f"        {symbol} WEEKLY ANALYSIS")
+    print(f"        {symbol} DAILY ANALYSIS")
     print("═" * 50)
 
     candle = analysis["candle"]
@@ -614,7 +614,7 @@ def print_result(symbol, analysis, messages):
     )
 
     print(
-        f"Weekly candle : "
+        f"Daily candle  : "
         f"{dt.strftime('%Y-%m-%d')} UTC"
     )
 
@@ -753,7 +753,7 @@ def print_result(symbol, analysis, messages):
 def main():
 
     print()
-    print("📊 Bitget Weekly Trading Analyzer")
+    print("📊 Bitget Daily Trading Analyzer")
     print("   SOLUSDT")
     print()
 
