@@ -514,7 +514,7 @@ def analyze(candles, config):
             market_status.append(("entry_zone", "market", ""))
             market_status.append(("entry_zone", "explanation", ""))
         else:
-            market_status.append(("entry_zone", "market", ""))
+            market_status.append(("low_rsi", "explanation", ""))
 
     # EMA status
     if ema_fast is not None and ema_slow is not None:
