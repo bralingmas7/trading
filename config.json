@@ -1,0 +1,25 @@
+{
+  "symbol": "SOLUSDT",
+  "candle_limit": 100,
+  "use_closed_candle": true,
+
+  "indicators": {
+    "rsi_period": 14,
+    "ema_fast": 20,
+    "ema_slow": 50
+  },
+
+  "entry": {
+    "rsi_min": 40,
+    "rsi_max": 55,
+
+    "price_above_ema": true,
+
+    "volume_period": 20,
+    "volume_multiplier": 1.0,
+
+    "strong_score": 5,
+    "normal_score": 4,
+    "wait_score": 3
+  }
+}
