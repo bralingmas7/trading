@@ -1,0 +1,36 @@
+{
+  "entry": {
+    "strong": "🔥 Setup entry kuat",
+    "normal": "🟢 Setup entry menarik",
+    "wait": "🟡 Tunggu konfirmasi",
+    "avoid": "🔴 Belum ada setup entry"
+  },
+
+  "market": {
+    "overbought": "⚠️ RSI tinggi, jangan mengejar harga",
+    "strong_momentum": "🚀 Momentum bullish kuat",
+    "pullback": "🔄 Pullback sehat",
+    "weak_volume": "📉 Volume masih di bawah rata-rata",
+    "strong_volume": "📈 Volume mendukung pergerakan",
+    "normal_volume": "🟡 Volume berada di sekitar rata-rata",
+    "ema_bullish": "🟢 Struktur EMA bullish",
+    "ema_bearish": "🔴 Struktur EMA bearish",
+    "price_above_ema": "🟢 Harga berada di atas EMA",
+    "price_below_ema": "🔴 Harga berada di bawah EMA",
+    "price_near_ema": "🟡 Harga dekat dengan EMA20",
+    "price_far_above_ema": "⚠️ Harga sudah cukup jauh di atas EMA20",
+    "bullish_candle": "🟢 Candle weekly bullish",
+    "bearish_candle": "🔴 Candle weekly bearish"
+  },
+
+  "explanation": {
+    "high_rsi": "RSI sudah tinggi, lebih baik menunggu pullback daripada mengejar harga.",
+    "low_rsi": "RSI berada di area rendah dan mulai menarik untuk dipantau.",
+    "entry_zone": "RSI berada di zona entry yang ditentukan.",
+    "weak_volume": "Volume berada di bawah rata-rata sehingga konfirmasi belum kuat.",
+    "bullish_trend": "EMA20 berada di atas EMA50 sehingga struktur trend bullish.",
+    "bearish_trend": "EMA20 berada di bawah EMA50 sehingga struktur trend belum bullish.",
+    "price_above_ema": "Harga berada di atas EMA20, menunjukkan harga masih relatif kuat.",
+    "bullish_candle": "Candle weekly ditutup bullish."
+  }
+}
