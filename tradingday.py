@@ -13,7 +13,7 @@ import requests
 
 API_FILE = "api.txt"
 CONFIG_FILE = "config.json"
-MESSAGES_FILE = "messages.json"
+MESSAGES_FILE = "messagesday.json"
 
 BASE_URL = "https://api.bitget.com"
 
