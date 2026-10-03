@@ -175,7 +175,7 @@ def remove_open_candle(candles):
 
     day_ms = 24 * 60 * 60 * 1000
 
-    candle_end = last["timestamp"] + week_ms
+    candle_end = last["timestamp"] + day_ms
 
     if candle_end > now_ms:
         return candles[:-1]
