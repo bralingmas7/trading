@@ -19,8 +19,8 @@
     "price_below_ema": "🔴 Harga berada di bawah EMA",
     "price_near_ema": "🟡 Harga dekat dengan EMA20",
     "price_far_above_ema": "⚠️ Harga sudah cukup jauh di atas EMA20",
-    "bullish_candle": "🟢 Candle weekly bullish",
-    "bearish_candle": "🔴 Candle weekly bearish"
+    "bullish_candle": "🟢 Candle daily bullish",
+    "bearish_candle": "🔴 Candle daily bearish"
   },
 
   "explanation": {
@@ -31,6 +31,6 @@
     "bullish_trend": "EMA20 berada di atas EMA50 sehingga struktur trend bullish.",
     "bearish_trend": "EMA20 berada di bawah EMA50 sehingga struktur trend belum bullish.",
     "price_above_ema": "Harga berada di atas EMA20, menunjukkan harga masih relatif kuat.",
-    "bullish_candle": "Candle weekly ditutup bullish."
+    "bullish_candle": "Candle daily ditutup bullish."
   }
 }
