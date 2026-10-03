@@ -15,6 +15,14 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import requests
+try:
+    import websocket
+except ImportError:
+    print("❌ Modul websocket-client belum terpasang")
+    print("   Jalankan: pip install websocket-client")
+    sys.exit(1)
+
+import threading
 
 # ============================================================
 # FILE CONFIG
@@ -33,6 +41,8 @@ DEFAULT_MAKER_FEE = 0.001
 TP_PERCENT = 0.01           # +1%
 POLL_INTERVAL = 2           # detik
 MAX_POLL = 300              # max \~10 menit
+WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
+WS_TIMEOUT = 600            # max 10 menit tunggu fill via WS
 
 # ============================================================
 # LOAD FILES
@@ -167,6 +177,294 @@ def public_get(path, params=None):
     return result.get("data")
 
 # ============================================================
+# WEBSOCKET ORDER MONITOR
+# ============================================================
+
+def _ws_login_sign(secret_key, timestamp):
+    """Sign untuk login WebSocket private."""
+    message = f"{timestamp}GET/user/verify"
+    mac = hmac.new(
+        secret_key.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    )
+    return base64.b64encode(mac.digest()).decode("utf-8")
+
+class OrderWebSocketMonitor:
+    """
+    Monitor status order via Bitget private WebSocket.
+    Subscribe channel 'orders' SPOT, tunggu orderId mencapai filled/cancelled.
+    """
+
+    def __init__(self, api, symbol):
+        self.api = api
+        self.symbol = symbol
+        self.ws = None
+        self.logged_in = False
+        self.subscribed = False
+        self.target_order_id = None
+        self.result = None
+        self.done = threading.Event()
+        self.error = None
+        self._lock = threading.Lock()
+
+    def _on_open(self, ws):
+        # Login (timestamp dalam detik untuk WS Bitget)
+        ts = str(int(time.time()))
+        sign = _ws_login_sign(self.api["secret_key"], ts)
+        login_msg = {
+            "op": "login",
+            "args": [{
+                "apiKey": self.api["api_key"],
+                "passphrase": self.api["passphrase"],
+                "timestamp": ts,
+                "sign": sign,
+            }],
+        }
+        ws.send(json.dumps(login_msg))
+
+    def _on_message(self, ws, message):
+        if message == "pong":
+            return
+
+        try:
+            data = json.loads(message)
+        except ValueError:
+            return
+
+        # Login response
+        event = data.get("event")
+        if event == "login":
+            code = str(data.get("code", ""))
+            if code in ("0", "00000"):
+                self.logged_in = True
+                # Subscribe orders channel
+                sub = {
+                    "op": "subscribe",
+                    "args": [{
+                        "instType": "SPOT",
+                        "channel": "orders",
+                        "instId": self.symbol,
+                    }],
+                }
+                ws.send(json.dumps(sub))
+            else:
+                self.error = f"WS login gagal: {data}"
+                self.done.set()
+            return
+
+        if event == "subscribe":
+            self.subscribed = True
+            return
+
+        if event == "error":
+            self.error = f"WS error: {data}"
+            self.done.set()
+            return
+
+        # Order push
+        if data.get("arg", {}).get("channel") != "orders":
+            return
+
+        items = data.get("data") or []
+        for item in items:
+            order_id = str(item.get("orderId") or item.get("ordId") or "")
+            if not self.target_order_id or order_id != str(self.target_order_id):
+                continue
+
+            status = (
+                item.get("status")
+                or item.get("orderStatus")
+                or item.get("state")
+                or ""
+            ).lower()
+
+            base_vol = float(
+                item.get("baseVolume")
+                or item.get("accBaseVolume")
+                or item.get("fillSize")
+                or 0
+            )
+            quote_vol = float(
+                item.get("quoteVolume")
+                or item.get("fillNotionalUsd")
+                or item.get("notional")
+                or 0
+            )
+            price_avg = float(
+                item.get("priceAvg")
+                or item.get("fillPrice")
+                or item.get("avgPrice")
+                or 0
+            )
+            size = float(item.get("size") or item.get("newSize") or 0)
+
+            print(
+                f"\r   [WS] status={status}  "
+                f"base={base_vol}  avg={price_avg}",
+                end="",
+                flush=True,
+            )
+
+            if status in ("filled", "full_fill"):
+                with self._lock:
+                    self.result = {
+                        "status": status,
+                        "price_avg": price_avg,
+                        "base_volume": base_vol,
+                        "quote_volume": quote_vol,
+                        "raw": item,
+                    }
+                print()
+                self.done.set()
+                return
+
+            if status in ("cancelled", "canceled"):
+                with self._lock:
+                    self.result = None
+                print()
+                print(f"❌ Order {order_id} dibatalkan (WS)")
+                self.done.set()
+                return
+
+    def _on_error(self, ws, error):
+        self.error = str(error)
+
+    def _on_close(self, ws, close_status_code, close_msg):
+        if not self.done.is_set():
+            self.error = f"WS closed: {close_status_code} {close_msg}"
+            self.done.set()
+
+    def _ping_loop(self, ws):
+        while not self.done.is_set():
+            try:
+                ws.send("ping")
+            except Exception:
+                break
+            time.sleep(20)
+
+    def start(self):
+        """Buka koneksi WS + login + subscribe (non-blocking thread)."""
+        self.ws = websocket.WebSocketApp(
+            WS_PRIVATE_URL,
+            on_open=self._on_open,
+            on_message=self._on_message,
+            on_error=self._on_error,
+            on_close=self._on_close,
+        )
+        t = threading.Thread(
+            target=self.ws.run_forever,
+            kwargs={"ping_interval": 0},
+            daemon=True,
+        )
+        t.start()
+
+        # Tunggu login + subscribe max 15 detik
+        for _ in range(30):
+            if self.logged_in and self.subscribed:
+                # Start ping
+                threading.Thread(
+                    target=self._ping_loop,
+                    args=(self.ws,),
+                    daemon=True,
+                ).start()
+                return True
+            if self.error:
+                print(f"❌ {self.error}")
+                return False
+            time.sleep(0.5)
+
+        print("❌ Timeout login/subscribe WebSocket")
+        return False
+
+    def wait_order(self, order_id, label="Order"):
+        """Tunggu order_id filled via WS. Fallback REST jika timeout."""
+        self.target_order_id = str(order_id)
+        self.result = None
+        self.done.clear()
+        self.error = None
+
+        print(f"\n⏳ [WS] Monitor {label} ...")
+        print(f"   Order ID: {order_id}")
+
+        ok = self.done.wait(timeout=WS_TIMEOUT)
+
+        if self.error and not self.result:
+            print(f"\n⚠️ WS issue: {self.error}")
+            print("   Fallback ke REST polling...")
+            return wait_until_filled_rest(
+                self.api, self.symbol, order_id, label=label
+            )
+
+        if not ok:
+            print(f"\n⚠️ WS timeout {label}, fallback REST...")
+            return wait_until_filled_rest(
+                self.api, self.symbol, order_id, label=label
+            )
+
+        if self.result:
+            print(f"✅ {label} 100% filled (WS)")
+        return self.result
+
+    def close(self):
+        self.done.set()
+        if self.ws:
+            try:
+                self.ws.close()
+            except Exception:
+                pass
+
+def wait_until_filled_rest(api, symbol, order_id, label="Order"):
+    """Fallback REST polling (cadangan jika WS gagal)."""
+    print(f"\n⏳ [REST] Monitor {label} ...")
+    print(f"   Order ID: {order_id}")
+
+    for i in range(MAX_POLL):
+        info = get_order_info(api, symbol, order_id)
+        if not info:
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        status = (info.get("status") or "").lower()
+        base_vol = float(info.get("baseVolume") or 0)
+        quote_vol = float(info.get("quoteVolume") or 0)
+        price_avg = float(info.get("priceAvg") or 0)
+        size = float(info.get("size") or 0)
+
+        filled_pct = 0.0
+        if size > 0 and base_vol > 0:
+            filled_pct = min(100.0, (base_vol / size) * 100)
+
+        print(
+            f"\r   [{i+1}] status={status}  "
+            f"filled≈{filled_pct:.1f}%  "
+            f"avg={price_avg}  base={base_vol}",
+            end="",
+            flush=True,
+        )
+
+        if status in ("filled", "full_fill"):
+            print()
+            print(f"✅ {label} 100% filled (REST)")
+            return {
+                "status": status,
+                "price_avg": price_avg,
+                "base_volume": base_vol,
+                "quote_volume": quote_vol,
+                "raw": info,
+            }
+
+        if status in ("cancelled", "canceled"):
+            print()
+            print(f"❌ {label} dibatalkan")
+            return None
+
+        time.sleep(POLL_INTERVAL)
+
+    print()
+    print(f"⚠️ Timeout monitor {label}")
+    return None
+# ============================================================
 # MARKET DATA
 # ============================================================
 
@@ -279,58 +577,7 @@ def get_order_info(api, symbol, order_id):
         return data[0] if data else None
     return data
 
-def wait_until_filled(api, symbol, order_id, label="Order"):
-    print(f"\n⏳ Monitor {label} ...")
-    print(f"   Order ID: {order_id}")
-
-    for i in range(MAX_POLL):
-        info = get_order_info(api, symbol, order_id)
-        if not info:
-            time.sleep(POLL_INTERVAL)
-            continue
-
-        status = (info.get("status") or "").lower()
-        base_vol = float(info.get("baseVolume") or 0)
-        quote_vol = float(info.get("quoteVolume") or 0)
-        price_avg = float(info.get("priceAvg") or 0)
-        size = float(info.get("size") or 0)
-
-        filled_pct = 0.0
-        if size > 0 and base_vol > 0:
-            # limit: size = base qty
-            filled_pct = min(100.0, (base_vol / size) * 100)
-        elif quote_vol > 0 and size > 0 and status == "filled":
-            filled_pct = 100.0
-
-        print(
-            f"\r   [{i+1}] status={status}  "
-            f"filled≈{filled_pct:.1f}%  "
-            f"avg={price_avg}  base={base_vol}",
-            end="",
-            flush=True,
-        )
-
-        if status in ("filled", "full_fill"):
-            print()
-            print(f"✅ {label} 100% filled")
-            return {
-                "status": status,
-                "price_avg": price_avg,
-                "base_volume": base_vol,
-                "quote_volume": quote_vol,
-                "raw": info,
-            }
-
-        if status in ("cancelled", "canceled"):
-            print()
-            print(f"❌ {label} dibatalkan")
-            return None
-
-        time.sleep(POLL_INTERVAL)
-
-    print()
-    print(f"⚠️ Timeout monitor {label}")
-    return None
+# wait_until_filled diganti OrderWebSocketMonitor + wait_until_filled_rest
 
 # ============================================================
 # INDICATORS
@@ -656,6 +903,13 @@ def run_trade_flow(api, symbol, config, messages):
         print("Buy dibatalkan.")
         return
 
+    # Start WebSocket monitor SEBELUM place order
+    print("\n🔌 Menghubungkan WebSocket private...")
+    ws_mon = OrderWebSocketMonitor(api, symbol)
+    if not ws_mon.start():
+        print("⚠️ WS gagal, akan pakai REST fallback saat monitor")
+        ws_mon = None
+
     # Place limit buy @ best ask
     print("\n🚀 Place BUY limit @ best ask ...")
     result = place_order(
@@ -670,21 +924,29 @@ def run_trade_flow(api, symbol, config, messages):
 
     if not result:
         print("❌ Gagal place buy")
+        if ws_mon:
+            ws_mon.close()
         return
 
     order_id = result.get("orderId")
     print(f"✅ Buy order placed: {order_id}")
 
-    fill = wait_until_filled(api, symbol, order_id, label="BUY")
+    # Monitor BUY via WebSocket sampai filled
+    if ws_mon:
+        fill = ws_mon.wait_order(order_id, label="BUY")
+    else:
+        fill = wait_until_filled_rest(api, symbol, order_id, label="BUY")
+
     if not fill:
         print("❌ Buy tidak ter-fill / dibatalkan")
+        if ws_mon:
+            ws_mon.close()
         return
 
     entry_price = fill["price_avg"] or preview["best_ask"]
     filled_qty = fill["base_volume"] or preview["qty"]
     quote_spent = fill["quote_volume"] or (filled_qty * entry_price)
 
-    # Actual cost + fee estimate
     fee_buy_est = quote_spent * fee_rate
     total_cost = quote_spent + fee_buy_est
 
@@ -693,11 +955,16 @@ def run_trade_flow(api, symbol, config, messages):
     print(f"   Quote spent : ${price_format(quote_spent)}")
 
     # Sell price +1% dari avg fill
-    sell_price = round_price(entry_price * (1 + TP_PERCENT), sym_info["price_precision"])
+    sell_price = round_price(
+        entry_price * (1 + TP_PERCENT),
+        sym_info["price_precision"],
+    )
     preview_sell(filled_qty, entry_price, sell_price, fee_rate, total_cost)
 
     if not ask_yes_no("Confirm SELL +1% sekarang?"):
         print("Sell dibatalkan. Posisi tetap dipegang.")
+        if ws_mon:
+            ws_mon.close()
         return
 
     print("\n🚀 Place SELL limit @ +1% ...")
@@ -713,12 +980,24 @@ def run_trade_flow(api, symbol, config, messages):
 
     if not result:
         print("❌ Gagal place sell")
+        if ws_mon:
+            ws_mon.close()
         return
 
     sell_order_id = result.get("orderId")
     print(f"✅ Sell order placed: {sell_order_id}")
 
-    sell_fill = wait_until_filled(api, symbol, sell_order_id, label="SELL")
+    # Monitor SELL via WebSocket sampai terjual
+    if ws_mon:
+        sell_fill = ws_mon.wait_order(sell_order_id, label="SELL")
+    else:
+        sell_fill = wait_until_filled_rest(
+            api, symbol, sell_order_id, label="SELL"
+        )
+
+    if ws_mon:
+        ws_mon.close()
+
     if not sell_fill:
         print("⚠️ Sell belum filled / timeout. Cek manual di Bitget.")
         return
