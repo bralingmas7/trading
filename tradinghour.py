@@ -74,8 +74,8 @@ def get_candles(symbol, limit=100):
     """
     Mengambil candle Spot Bitget.
 
-    Daily:
-        1day
+    1H:
+        1h
 
     Response:
         [
@@ -155,13 +155,12 @@ def get_candles(symbol, limit=100):
 
 
 # ============================================================
-# FILTER CANDLE DAILY YANG SUDAH CLOSE
+# FILTER CANDLE 1H YANG SUDAH CLOSE
 # ============================================================
 
 def remove_open_candle(candles):
     """
-    Candle daily terakhir bisa masih berjalan.
-    Candle daily = 1 hari.
+    Candle 1H terakhir bisa masih berjalan.
 
     Jika candle terakhir belum selesai, buang.
     """
@@ -417,7 +416,7 @@ def analyze(candles, config):
 
     # ========================================================
     # CONDITION 4
-    # DAILY CANDLE
+    # 1H CANDLE
     # ========================================================
 
     candle_bullish = (
@@ -506,15 +505,16 @@ def analyze(candles, config):
     # RSI status
     if rsi is not None:
         if rsi >= 70:
-            market_status.append(("rsi_overbought", "explanation", "overbought"))
+            market_status.append(("overbought", "market", ""))
+            market_status.append(("high_rsi", "explanation", ""))
         elif rsi >= 55:
-            market_status.append(("rsi_momentum", "market", ""))
+            market_status.append(("strong_momentum", "market", ""))
             market_status.append(("high_rsi", "explanation", ""))
         elif rsi >= rsi_min:
-            market_status.append(("rsi_entry", "market", ""))
+            market_status.append(("entry_zone", "market", ""))
             market_status.append(("entry_zone", "explanation", ""))
         else:
-            market_status.append(("rsi_entry", "market", ""))
+            market_status.append(("entry_zone", "market", ""))
 
     # EMA status
     if ema_fast is not None and ema_slow is not None:
@@ -561,18 +561,18 @@ def analyze(candles, config):
     # Volume
     if volume_ratio >= 1.2:
         market_status.append(
-            ("volume_strong", "market", "")
+            ("strong_volume", "market", "")
         )
         market_status.append(
             ("strong_volume", "explanation", "")
         )
     elif volume_ratio >= 0.8:
         market_status.append(
-            ("volume_normal", "market", "")
+            ("normal_volume", "market", "")
         )
     else:
         market_status.append(
-            ("volume_weak", "market", "")
+            ("weak_volume", "market", "")
         )
         market_status.append(
             ("weak_volume", "explanation", "")
