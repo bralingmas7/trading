@@ -38,7 +38,7 @@ BASE_URL = "https://api.bitget.com"
 DEFAULT_TAKER_FEE = 0.001   # 0.1%
 DEFAULT_MAKER_FEE = 0.001
 
-TP_PERCENT = 0.01           # +1%
+TP_PERCENT = 0.023          # +2.3%
 POLL_INTERVAL = 2           # detik
 MAX_POLL = 300              # max \~10 menit
 WS_PRIVATE_URL = "wss://ws.bitget.com/v2/ws/private"
@@ -861,7 +861,7 @@ def preview_sell(qty, entry_price, sell_price, fee_rate, total_cost_buy):
 
     print()
     print("═" * 50)
-    print("        SELL PREVIEW (+1%)")
+    print("        SELL PREVIEW (+2.3%)")
     print("═" * 50)
     print(f"Entry Avg     : ${price_format(entry_price)}")
     print(f"Sell Price    : ${price_format(sell_price)}")
@@ -962,13 +962,13 @@ def run_trade_flow(api, symbol, config, messages):
     )
     preview_sell(filled_qty, entry_price, sell_price, fee_rate, total_cost)
 
-    if not ask_yes_no("Confirm SELL +1% sekarang?"):
+    if not ask_yes_no("Confirm SELL +2.3% sekarang?"):
         print("Sell dibatalkan. Posisi tetap dipegang.")
         if ws_mon:
             ws_mon.close()
         return
 
-    print("\n🚀 Place SELL limit @ +1% ...")
+    print("\n🚀 Place SELL limit @ +2.3% ...")
     result = place_order(
         api,
         symbol=symbol,
@@ -1029,7 +1029,7 @@ def run_trade_flow(api, symbol, config, messages):
 def main():
     print()
     print("📊 Bitget Daily Trading Bot")
-    print("   Signal → Buy → Sell +1%")
+    print("   Signal → Buy → Sell +2.3%")
     print()
 
     api = load_api()
