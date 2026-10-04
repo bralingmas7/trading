@@ -993,12 +993,34 @@ def run_trade_flow(api, symbol, config, messages):
         return
 
     print("\n🚀 Place SELL limit @ +1% ...")
+
+    # Fee BUY dapat dipotong dari asset base.
+    # Gunakan qty setelah estimasi fee agar tidak terkena
+    # Bitget error 43012 (Insufficient balance).
+    sell_qty = (
+        int(
+            (filled_qty * (1 - fee_rate))
+            * (10 ** sym_info["qty_precision"])
+        )
+        / (10 ** sym_info["qty_precision"])
+    )
+
+    if sell_qty <= 0:
+        print("❌ SELL qty terlalu kecil setelah fee")
+        if ws_mon:
+            ws_mon.close()
+        return
+
+    print(f"📦 SELL qty     : {sell_qty}")
+    print(f"   Filled qty   : {filled_qty}")
+    print(f"   Fee reserve  : {filled_qty - sell_qty}")
+
     result = place_order(
         api,
         symbol=symbol,
         side="sell",
         order_type="limit",
-        size=filled_qty,
+        size=sell_qty,
         price=sell_price,
         force="gtc",
     )
