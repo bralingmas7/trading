@@ -912,6 +912,30 @@ def run_trade_flow(api, symbol, config, messages):
 
     # Place limit buy @ best ask
     print("\n🚀 Place BUY limit @ best ask ...")
+    # Hitung minimum nominal input yang aman setelah rounding qty
+    min_safe_qty = (
+        int(
+            (min_buy_usdt / preview["best_ask"])
+            * (10 ** sym_info["qty_precision"])
+        ) + 1
+    ) / (10 ** sym_info["qty_precision"])
+
+    min_safe_usdt = min_safe_qty * preview["best_ask"]
+    # Validasi nominal final setelah rounding qty
+    final_buy_usdt = preview["qty"] * preview["best_ask"]
+    min_buy_usdt = sym_info["min_trade_usdt"]
+
+    if final_buy_usdt < min_buy_usdt:
+        print(
+            f"❌ BUY ditolak: nominal final "
+            f"{final_buy_usdt:.8f} USDT < minimum "
+            f"{min_buy_usdt:.8f} USDT"
+        )
+        print(
+            f"💡 Minimum aman pada harga sekarang: "
+            f"{min_safe_usdt:.8f} USDT"
+        )
+        return
     result = place_order(
         api,
         symbol=symbol,
