@@ -912,6 +912,8 @@ def run_trade_flow(api, symbol, config, messages):
 
     # Place limit buy @ best ask
     print("\n🚀 Place BUY limit @ best ask ...")
+    min_buy_usdt = sym_info["min_trade_usdt"]
+
     # Hitung minimum nominal input yang aman setelah rounding qty
     min_safe_qty = (
         int(
@@ -923,7 +925,6 @@ def run_trade_flow(api, symbol, config, messages):
     min_safe_usdt = min_safe_qty * preview["best_ask"]
     # Validasi nominal final setelah rounding qty
     final_buy_usdt = preview["qty"] * preview["best_ask"]
-    min_buy_usdt = sym_info["min_trade_usdt"]
 
     if final_buy_usdt < min_buy_usdt:
         print(
