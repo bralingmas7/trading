@@ -746,6 +746,11 @@ def analyze(candles, config):
         signal = "wait"
     else:
         signal = "avoid"
+    # RSI wajib: kalau di luar area entry, sinyal entry diturunkan jadi wait
+    if entry_config.get("rsi_required", True):
+        rsi_ok = rsi is not None and rsi_min <= rsi <= rsi_max
+        if signal in ("strong", "normal") and not rsi_ok:
+            signal = "wait"
 
     return {
         "price": price,
