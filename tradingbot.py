@@ -577,6 +577,29 @@ def get_order_info(api, symbol, order_id):
         return data[0] if data else None
     return data
 
+
+def get_available_balance(api, coin):
+    data = private_request(
+        api,
+        "GET",
+        "/api/v2/spot/account/assets",
+        params={"coin": coin},
+    )
+
+    if not data:
+        return None
+
+    if isinstance(data, list):
+        for asset in data:
+            if asset.get("coin", "").upper() == coin.upper():
+                return float(asset.get("available", "0"))
+
+    elif isinstance(data, dict):
+        if data.get("coin", "").upper() == coin.upper():
+            return float(data.get("available", "0"))
+
+    return 0.0
+
 # wait_until_filled diganti OrderWebSocketMonitor + wait_until_filled_rest
 
 # ============================================================
@@ -994,26 +1017,42 @@ def run_trade_flow(api, symbol, config, messages):
 
     print("\n🚀 Place SELL limit @ +1% ...")
 
-    # Fee BUY dapat dipotong dari asset base.
-    # Gunakan qty setelah estimasi fee agar tidak terkena
-    # Bitget error 43012 (Insufficient balance).
+    # Ambil saldo base asset yang benar-benar available.
+    # Jangan gunakan filled_qty langsung karena fee BUY
+    # dapat membuat available balance sedikit lebih kecil.
+    base_coin = symbol[:-4] if symbol.endswith("USDT") else symbol
+
+    available_qty = get_available_balance(
+        api,
+        base_coin,
+    )
+
+    if available_qty is None:
+        print("❌ Gagal mendapatkan available balance")
+        if ws_mon:
+            ws_mon.close()
+        return
+
+    # SELL MAX: gunakan seluruh saldo available,
+    # lalu round down sesuai quantity precision.
     sell_qty = (
         int(
-            (filled_qty * (1 - fee_rate))
+            available_qty
             * (10 ** sym_info["qty_precision"])
         )
         / (10 ** sym_info["qty_precision"])
     )
 
     if sell_qty <= 0:
-        print("❌ SELL qty terlalu kecil setelah fee")
+        print("❌ SELL qty terlalu kecil")
         if ws_mon:
             ws_mon.close()
         return
 
-    print(f"📦 SELL qty     : {sell_qty}")
-    print(f"   Filled qty   : {filled_qty}")
-    print(f"   Fee reserve  : {filled_qty - sell_qty}")
+    print(f"📦 Available {base_coin}: {available_qty}")
+    print(f"📦 SELL MAX qty      : {sell_qty}")
+    print(f"   BUY filled qty    : {filled_qty}")
+    print(f"   Difference        : {filled_qty - sell_qty}")
 
     result = place_order(
         api,
