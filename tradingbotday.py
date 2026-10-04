@@ -955,7 +955,7 @@ def run_trade_flow(api, symbol, config, messages):
     print(f"   Avg price   : ${price_format(entry_price)}")
     print(f"   Quote spent : ${price_format(quote_spent)}")
 
-    # Sell price +1% dari avg fill
+    # Sell price +2.3% dari avg fill
     sell_price = round_price(
         entry_price * (1 + TP_PERCENT),
         sym_info["price_precision"],
@@ -969,12 +969,50 @@ def run_trade_flow(api, symbol, config, messages):
         return
 
     print("\n🚀 Place SELL limit @ +2.3% ...")
+
+    # Ambil saldo base asset yang benar-benar available.
+    # Jangan gunakan filled_qty langsung karena fee BUY
+    # dapat membuat available balance sedikit lebih kecil.
+    base_coin = symbol[:-4] if symbol.endswith("USDT") else symbol
+
+    available_qty = get_available_balance(
+        api,
+        base_coin,
+    )
+
+    if available_qty is None:
+        print("❌ Gagal mendapatkan available balance")
+        if ws_mon:
+            ws_mon.close()
+        return
+
+    # SELL MAX: gunakan seluruh saldo available,
+    # lalu round down sesuai quantity precision.
+    sell_qty = (
+        int(
+            available_qty
+            * (10 ** sym_info["qty_precision"])
+        )
+        / (10 ** sym_info["qty_precision"])
+    )
+
+    if sell_qty <= 0:
+        print("❌ SELL qty terlalu kecil")
+        if ws_mon:
+            ws_mon.close()
+        return
+
+    print(f"📦 Available {base_coin}: {available_qty}")
+    print(f"📦 SELL MAX qty      : {sell_qty}")
+    print(f"   BUY filled qty    : {filled_qty}")
+    print(f"   Difference        : {filled_qty - sell_qty}")
+
     result = place_order(
         api,
         symbol=symbol,
         side="sell",
         order_type="limit",
-        size=filled_qty,
+        size=sell_qty,
         price=sell_price,
         force="gtc",
     )
