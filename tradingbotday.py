@@ -578,6 +578,27 @@ def get_order_info(api, symbol, order_id):
         return data[0] if data else None
     return data
 
+def get_available_balance(api, coin):
+    data = private_request(
+        api,
+        "GET",
+        "/api/v2/spot/account/assets",
+        params={"coin": coin},
+    )
+
+    if not data:
+        return None
+
+    if isinstance(data, list):
+        for asset in data:
+            if asset.get("coin", "").upper() == coin.upper():
+                return float(asset.get("available", "0"))
+
+    elif isinstance(data, dict):
+        if data.get("coin", "").upper() == coin.upper():
+            return float(data.get("available", "0"))
+
+    return 0.0
 # wait_until_filled diganti OrderWebSocketMonitor + wait_until_filled_rest
 
 # ============================================================
