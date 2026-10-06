@@ -345,9 +345,26 @@ def round_down(value, places):
     return Decimal(str(value)).quantize(q, rounding=ROUND_DOWN)
 
 
+def get_quote_precision(info):
+    for key in ("quotePrecision", "quotePlace"):
+        try:
+            value = int(info.get(key))
+            if value >= 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+    return 6
+
+
 def prepare_limit_order(symbol, usdt_amount, price, info):
+    """
+    Hitung size limit buy dari nominal USDT.
+    Pastikan setelah round-down, notional (qty * price)
+    masih >= minTradeUSDT (mirip tradingbot.py).
+    """
     qty_precision = get_qty_precision(info)
     price_precision = get_price_precision(info)
+    minimum = get_min_usdt(info)
 
     price = round_down(price, price_precision)
 
@@ -360,11 +377,33 @@ def prepare_limit_order(symbol, usdt_amount, price, info):
     if quantity <= 0:
         raise ValueError("Quantity setelah pembulatan menjadi 0.")
 
+    notional = quantity * price
+
+    if notional < minimum:
+        # Hitung minimum qty yang aman setelah precision
+        min_qty = (minimum / price).quantize(
+            Decimal("1").scaleb(-qty_precision),
+            rounding=ROUND_DOWN,
+        )
+        # Naikkan 1 tick qty supaya pasti lolos
+        step = Decimal("1").scaleb(-qty_precision)
+        min_qty = min_qty + step
+        min_safe_usdt = (min_qty * price).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_DOWN,
+        )
+        raise ValueError(
+            f"Notional setelah round {fmt_num(notional)} USDT "
+            f"< minimum {fmt_num(minimum)} USDT. "
+            f"Pakai nominal minimal aman ≈ {fmt_num(min_safe_usdt)} USDT"
+        )
+
     return {
         "symbol": symbol,
         "usdt": Decimal(str(usdt_amount)),
         "price": price,
         "size": quantity,
+        "notional": notional,
         "price_precision": price_precision,
         "qty_precision": qty_precision,
     }
@@ -663,17 +702,6 @@ def main():
         console.print()
 
         for symbol, amount in zip(selected_symbols, amounts):
-            # Fee Bitget 0.1%: hitung nominal order agar setelah fee
-            # nilai pembelian tetap sesuai nominal yang diminta.
-            fee_rate = Decimal("0.001")
-            order_amount = amount / (Decimal("1") - fee_rate)
-
-            # Bitget delegateAmount maksimal 6 angka desimal.
-            order_amount = order_amount.quantize(
-                Decimal("0.000001"),
-                rounding=ROUND_DOWN,
-            )
-
             info, err = get_symbol_info(symbol)
 
             if err:
@@ -683,12 +711,29 @@ def main():
                 continue
 
             minimum = get_min_usdt(info)
+            quote_prec = get_quote_precision(info)
+
+            # Fee Bitget 0.1%: hitung nominal order agar setelah fee
+            # nilai pembelian tetap sesuai nominal yang diminta.
+            fee_rate = Decimal("0.001")
+            order_amount = amount / (Decimal("1") - fee_rate)
+
+            # Round sesuai quotePrecision symbol (bukan hardcode 6)
+            order_amount = round_down(order_amount, quote_prec)
 
             if order_amount < minimum:
+                # Minimum aman + buffer fee + 1 tick quote
+                step = Decimal("1").scaleb(-quote_prec)
+                min_safe = (minimum / (Decimal("1") - fee_rate)).quantize(
+                    step, rounding=ROUND_DOWN
+                ) + step
                 console.print(
                     f"[red]❌ {symbol}: nominal + fee "
                     f"{fmt_num(order_amount)} USDT "
                     f"< minimum {fmt_num(minimum)} USDT[/red]"
+                )
+                console.print(
+                    f"[yellow]💡 Minimal aman ≈ {fmt_num(min_safe)} USDT[/yellow]"
                 )
                 continue
 
