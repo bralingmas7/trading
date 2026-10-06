@@ -712,26 +712,7 @@ def main():
 
             minimum = get_min_usdt(info)
             quote_prec = get_quote_precision(info)
-
-            # Fee Bitget 0.1%: hitung nominal order agar setelah fee
-            # nilai pembelian tetap sesuai nominal yang diminta.
-            fee_rate = Decimal("0.001")
-            order_amount = amount / (Decimal("1") - fee_rate)
-
-            # Round sesuai quotePrecision symbol
-            order_amount = round_down(order_amount, quote_prec)
-
-            # Auto-naikkan ke minimum (+ 1 tick) jika masih kurang
-            if order_amount < minimum:
-                step = Decimal("1").scaleb(-quote_prec)
-                order_amount = minimum.quantize(step, rounding=ROUND_DOWN)
-                if order_amount < minimum:
-                    order_amount = order_amount + step
-                console.print(
-                    f"[yellow]⚠️ {symbol}: nominal dinaikkan ke "
-                    f"{fmt_num(order_amount)} USDT "
-                    f"(min {fmt_num(minimum)})[/yellow]"
-                )
+            qty_prec = get_qty_precision(info)
 
             ticker, err = get_ticker(symbol)
 
@@ -743,6 +724,40 @@ def main():
 
             ask = ticker.get("ask")
             last = ticker.get("last")
+            ref_price = ask or last
+
+            if ref_price is None or ref_price <= 0:
+                console.print(
+                    f"[red]❌ {symbol}: harga tidak valid.[/red]"
+                )
+                continue
+
+            # Fee Bitget 0.1%
+            fee_rate = Decimal("0.001")
+            order_amount = amount / (Decimal("1") - fee_rate)
+            order_amount = round_down(order_amount, quote_prec)
+
+            # Min aman: setelah exchange convert quote→base + round qty,
+            # notional harus tetap >= minTradeUSDT
+            qty_step = Decimal("1").scaleb(-qty_prec)
+            min_qty = (minimum / ref_price).quantize(
+                qty_step, rounding=ROUND_DOWN
+            ) + qty_step
+            min_safe = (min_qty * ref_price).quantize(
+                Decimal("1").scaleb(-quote_prec),
+                rounding=ROUND_DOWN,
+            )
+            # +1 tick quote biar pasti lolos
+            quote_step = Decimal("1").scaleb(-quote_prec)
+            min_safe = min_safe + quote_step
+
+            if order_amount < min_safe:
+                console.print(
+                    f"[yellow]⚠️ {symbol}: nominal dinaikkan "
+                    f"{fmt_num(order_amount)} → {fmt_num(min_safe)} USDT "
+                    f"(min aman @ {fmt_num(ref_price)})[/yellow]"
+                )
+                order_amount = min_safe
 
             console.print(
                 Panel(
