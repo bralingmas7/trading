@@ -718,24 +718,20 @@ def main():
             fee_rate = Decimal("0.001")
             order_amount = amount / (Decimal("1") - fee_rate)
 
-            # Round sesuai quotePrecision symbol (bukan hardcode 6)
+            # Round sesuai quotePrecision symbol
             order_amount = round_down(order_amount, quote_prec)
 
+            # Auto-naikkan ke minimum (+ 1 tick) jika masih kurang
             if order_amount < minimum:
-                # Minimum aman + buffer fee + 1 tick quote
                 step = Decimal("1").scaleb(-quote_prec)
-                min_safe = (minimum / (Decimal("1") - fee_rate)).quantize(
-                    step, rounding=ROUND_DOWN
-                ) + step
+                order_amount = minimum.quantize(step, rounding=ROUND_DOWN)
+                if order_amount < minimum:
+                    order_amount = order_amount + step
                 console.print(
-                    f"[red]❌ {symbol}: nominal + fee "
+                    f"[yellow]⚠️ {symbol}: nominal dinaikkan ke "
                     f"{fmt_num(order_amount)} USDT "
-                    f"< minimum {fmt_num(minimum)} USDT[/red]"
+                    f"(min {fmt_num(minimum)})[/yellow]"
                 )
-                console.print(
-                    f"[yellow]💡 Minimal aman ≈ {fmt_num(min_safe)} USDT[/yellow]"
-                )
-                continue
 
             ticker, err = get_ticker(symbol)
 
