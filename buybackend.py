@@ -9,9 +9,14 @@ import os
 import sys
 import time
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from typing import List, Optional
 from urllib.parse import urlencode
 
 import requests
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -24,6 +29,34 @@ API_FILE = "api.txt"
 COIN_FILE = "coin.txt"
 
 console = Console()
+
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
+app = FastAPI(
+    title="Bitget Spot Buy API",
+    description="Backend untuk Spot Buy Tool",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # untuk development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global API credentials (loaded once)
+_API = None
+
+
+def get_api():
+    global _API
+    if _API is None:
+        _API = load_api()
+    return _API
 
 
 # ============================================================
@@ -528,6 +561,219 @@ def place_limit_buy(api, symbol, quantity, price):
         "/api/v2/spot/trade/place-order",
         body=body,
     )
+# ============================================================
+# PYDANTIC MODELS (untuk request body)
+# ============================================================
+
+class MarketOrderRequest(BaseModel):
+    symbol: str
+    usdt_amount: float = Field(..., gt=0)
+
+
+class LimitOrderRequest(BaseModel):
+    symbol: str
+    usdt_amount: float = Field(..., gt=0)
+    price: float = Field(..., gt=0)
+
+
+class LimitGridRequest(BaseModel):
+    symbol: str
+    usdt_amount: float = Field(..., gt=0)
+    bid_offset_pct: float = Field(0, ge=0)      # % di bawah best bid
+    grid_count: int = Field(1, ge=1)
+    grid_spacing_pct: float = Field(0, ge=0)    # jarak antar grid
+
+
+# ============================================================
+# API ENDPOINTS
+# ============================================================
+
+@app.get("/api/balance")
+def api_balance():
+    api = get_api()
+    balance, err = get_usdt_balance(api)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {
+        "balance": float(balance),
+        "formatted": fmt_num(balance),
+    }
+
+
+@app.get("/api/coins")
+def api_coins():
+    try:
+        coins = load_coins()
+        return {"coins": coins}
+    except SystemExit:
+        raise HTTPException(status_code=500, detail="Gagal load coin.txt")
+
+
+@app.get("/api/ticker/{symbol}")
+def api_ticker(symbol: str):
+    ticker, err = get_ticker(symbol.upper())
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {
+        "symbol": symbol.upper(),
+        "bid": float(ticker["bid"]) if ticker["bid"] is not None else None,
+        "ask": float(ticker["ask"]) if ticker["ask"] is not None else None,
+        "last": float(ticker["last"]) if ticker["last"] is not None else None,
+    }
+
+
+@app.get("/api/symbol-info/{symbol}")
+def api_symbol_info(symbol: str):
+    info, err = get_symbol_info(symbol.upper())
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {
+        "symbol": symbol.upper(),
+        "min_usdt": float(get_min_usdt(info)),
+        "price_precision": get_price_precision(info),
+        "qty_precision": get_qty_precision(info),
+        "quote_precision": get_quote_precision(info),
+    }
+
+
+@app.post("/api/order/market")
+def api_market_order(req: MarketOrderRequest):
+    api = get_api()
+    symbol = req.symbol.upper()
+    amount = Decimal(str(req.usdt_amount))
+
+    data, err = place_market_buy(api, symbol, amount)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    return {
+        "success": True,
+        "symbol": symbol,
+        "type": "market",
+        "usdt_amount": float(amount),
+        "response": data,
+    }
+
+
+@app.post("/api/order/limit")
+def api_limit_order(req: LimitOrderRequest):
+    api = get_api()
+    symbol = req.symbol.upper()
+    amount = Decimal(str(req.usdt_amount))
+    price = Decimal(str(req.price))
+
+    info, err = get_symbol_info(symbol)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    try:
+        prepared = prepare_limit_order(symbol, amount, price, info)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    data, err = place_limit_buy(
+        api,
+        symbol,
+        prepared["size"],
+        prepared["price"],
+    )
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    return {
+        "success": True,
+        "symbol": symbol,
+        "type": "limit",
+        "price": float(prepared["price"]),
+        "size": float(prepared["size"]),
+        "notional": float(prepared["notional"]),
+        "response": data,
+    }
+
+
+@app.post("/api/order/limit-grid")
+def api_limit_grid(req: LimitGridRequest):
+    """
+    Pasang limit order (bisa single atau grid).
+    - bid_offset_pct : % di bawah best bid untuk order pertama
+    - grid_count     : jumlah order
+    - grid_spacing_pct : jarak antar grid (%)
+    """
+    api = get_api()
+    symbol = req.symbol.upper()
+    amount = Decimal(str(req.usdt_amount))
+
+    info, err = get_symbol_info(symbol)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    ticker, err = get_ticker(symbol)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+
+    bid = ticker.get("bid")
+    if bid is None or bid <= 0:
+        raise HTTPException(status_code=400, detail="Best bid tidak valid")
+
+    results = []
+    first_price = bid * (Decimal("1") - Decimal(str(req.bid_offset_pct)) / Decimal("100"))
+
+    for i in range(req.grid_count):
+        multiplier = (
+            Decimal("1") - Decimal(str(req.grid_spacing_pct)) / Decimal("100")
+        ) ** i
+        price = first_price * multiplier
+
+        try:
+            prepared = prepare_limit_order(symbol, amount, price, info)
+        except ValueError as e:
+            results.append({
+                "grid": i + 1,
+                "success": False,
+                "error": str(e),
+            })
+            continue
+
+        data, err = place_limit_buy(
+            api,
+            symbol,
+            prepared["size"],
+            prepared["price"],
+        )
+
+        if err:
+            results.append({
+                "grid": i + 1,
+                "success": False,
+                "error": err,
+                "price": float(prepared["price"]),
+            })
+        else:
+            results.append({
+                "grid": i + 1,
+                "success": True,
+                "price": float(prepared["price"]),
+                "size": float(prepared["size"]),
+                "notional": float(prepared["notional"]),
+                "response": data,
+            })
+
+    return {
+        "symbol": symbol,
+        "best_bid": float(bid),
+        "bid_offset_pct": req.bid_offset_pct,
+        "grid_count": req.grid_count,
+        "grid_spacing_pct": req.grid_spacing_pct,
+        "orders": results,
+    }
+
+
+@app.get("/")
+def root():
+    return {
+        "message": "Bitget Spot Buy API is running",
+        "docs": "/docs",
+    }
 
 
 # ============================================================
@@ -974,4 +1220,31 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Bitget Spot Buy")
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Jalankan sebagai FastAPI server (default port 8000)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port untuk API server (default: 8000)",
+    )
+    args = parser.parse_args()
+
+    if args.api:
+        console.print(
+            Panel.fit(
+                "[bold cyan]BITGET SPOT BUY API[/bold cyan]\n"
+                f"[dim]Running on http://127.0.0.1:{args.port}[/dim]\n"
+                f"[dim]Docs: http://127.0.0.1:{args.port}/docs[/dim]",
+                border_style="cyan",
+            )
+        )
+        uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+    else:
+        main()
