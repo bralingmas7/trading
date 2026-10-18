@@ -808,21 +808,40 @@ def main():
         except (ValueError, TypeError):
             console.print("[red]❌ Jumlah grid harus >= 1.[/red]")
 
+    # Offset % di bawah best bid (berlaku untuk order pertama / single)
     while True:
         try:
-            grid_spacing = dec(
+            bid_offset = dec(
                 Prompt.ask(
-                    "[bold yellow]Jarak grid (%)"
+                    "[bold yellow]% di bawah best bid[/bold yellow]",
+                    default="0",
                 )
             )
-            if grid_spacing is None or grid_spacing <= 0:
+            if bid_offset is None or bid_offset < 0:
                 raise ValueError
             break
         except ValueError:
-            console.print("[red]❌ Jarak grid harus > 0.[/red]")
+            console.print("[red]❌ Offset harus >= 0.[/red]")
+
+    # Spacing hanya diminta jika grid > 1
+    grid_spacing = Decimal("0")
+    if grid_count > 1:
+        while True:
+            try:
+                grid_spacing = dec(
+                    Prompt.ask(
+                        "[bold yellow]Jarak antar grid (%)[/bold yellow]"
+                    )
+                )
+                if grid_spacing is None or grid_spacing <= 0:
+                    raise ValueError
+                break
+            except ValueError:
+                console.print("[red]❌ Jarak grid harus > 0.[/red]")
 
     console.print(
         f"\n[cyan]Grid:[/cyan] {grid_count}"
+        f"  [cyan]Offset:[/cyan] {fmt_num(bid_offset)}%"
         f"  [cyan]Spacing:[/cyan] {fmt_num(grid_spacing)}%"
     )
     console.print(
@@ -891,7 +910,8 @@ def main():
             Panel.fit(
                 f"[bold]{symbol}[/bold]\n"
                 f"Nominal / grid : [yellow]{fmt_num(amount)} USDT[/yellow]\n"
-                f"Bid awal       : [cyan]{fmt_num(bid)}[/cyan]\n"
+                f"Best bid       : [cyan]{fmt_num(bid)}[/cyan]\n"
+                f"Offset         : {fmt_num(bid_offset)}%\n"
                 f"Grid           : {grid_count}\n"
                 f"Jarak          : {fmt_num(grid_spacing)}%",
                 border_style="magenta",
@@ -899,14 +919,17 @@ def main():
         )
 
         for grid in range(grid_count):
-            # Grid 1 = bid sekarang.
-            # Grid berikutnya turun sesuai persentase spacing.
+            # Order pertama: best bid dikurangi offset %.
+            # Grid berikutnya turun lagi sesuai spacing.
+            first_price = bid * (
+                Decimal("1") - (Decimal(str(bid_offset)) / Decimal("100"))
+            )
             multiplier = (
                 Decimal("1")
                 - (Decimal(str(grid_spacing)) / Decimal("100"))
             ) ** grid
 
-            price = bid * multiplier
+            price = first_price * multiplier
 
             try:
                 prepared = prepare_limit_order(
