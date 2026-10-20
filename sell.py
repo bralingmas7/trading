@@ -627,46 +627,103 @@ def main():
         return
 
     # --------------------------------------------------------
-    # ENTRY PRICE
+    # MARKET PRICE / BEST BID
     # --------------------------------------------------------
+
+    best_bid = get_best_bid(symbol)
+
+    if best_bid is None:
+        print("❌ Gagal mendapatkan harga best bid")
+        return
+
+    print(f"\n📈 Best bid {symbol}: {best_bid}")
+
+    # --------------------------------------------------------
+    # SELL MODE
+    # --------------------------------------------------------
+
+    print("\nPilih metode jumlah SELL:")
+    print("[1] Persentase saldo")
+    print("[2] Nilai USDT")
+    print("[3] Jumlah coin")
+
+    qty_mode = input("Pilihan [1-3]: ").strip()
 
     try:
+        if qty_mode == "1":
+            percent = float(input("Persentase saldo (%): ").strip())
 
-        entry_price = float(
-            input(
-                "\nHarga entry BUY: "
-            ).strip()
-        )
+            if not 0 < percent <= 100:
+                print("❌ Persentase harus > 0 dan maksimal 100")
+                return
+
+            requested_qty = available_qty * percent / 100
+
+        elif qty_mode == "2":
+            usdt_amount = float(input("Nilai jual USDT: ").strip())
+
+            if usdt_amount <= 0:
+                print("❌ Nilai USDT harus > 0")
+                return
+
+            requested_qty = usdt_amount / best_bid
+
+        elif qty_mode == "3":
+            requested_qty = float(input(f"Jumlah {coin} yang dijual: ").strip())
+
+            if requested_qty <= 0:
+                print("❌ Qty harus > 0")
+                return
+
+        else:
+            print("❌ Pilihan tidak valid")
+            return
 
     except ValueError:
-
-        print(
-            "❌ Harga tidak valid"
-        )
-
+        print("❌ Input harus berupa angka")
         return
 
-    if entry_price <= 0:
+    sell_qty = floor_qty(
+        requested_qty,
+        sym_info["qty_precision"]
+    )
 
-        print(
-            "❌ Harga entry harus > 0"
-        )
+    if sell_qty <= 0:
+        print("❌ Qty terlalu kecil untuk precision simbol")
+        return
 
+    if sell_qty > available_qty:
+        print(f"❌ Qty melebihi saldo tersedia: {available_qty} {coin}")
         return
 
     # --------------------------------------------------------
-    # TARGET
+    # ORDER TYPE
     # --------------------------------------------------------
 
-    target_price = round_price(
-        entry_price * (1 + TP_PERCENT),
-        sym_info["price_precision"]
-    )
+    print("\nPilih jenis order:")
+    print("[1] Market SELL")
+    print("[2] Limit SELL pada best bid")
 
-    sell_value = (
-        max_sell_qty *
-        target_price
-    )
+    order_choice = input("Pilihan [1-2]: ").strip()
+
+    if order_choice == "1":
+        order_type = "market"
+        order_price = None
+        estimated_price = best_bid
+
+    elif order_choice == "2":
+        order_type = "limit"
+        order_price = round_price(
+            best_bid,
+            sym_info["price_precision"]
+        )
+        estimated_price = order_price
+
+    else:
+        print("❌ Pilihan order tidak valid")
+        return
+
+    sell_value = sell_qty * estimated_price
 
     # --------------------------------------------------------
     # PREVIEW
@@ -675,42 +732,23 @@ def main():
     print("\n" + "=" * 55)
     print("📊 SELL PREVIEW")
     print("=" * 55)
-
-    print(
-        f"Symbol          : {symbol}"
-    )
-
-    print(
-        f"Available       : "
-        f"{available_qty} {coin}"
-    )
-
-    print(
-        f"MAX SELL QTY    : "
-        f"{max_sell_qty} {coin}"
-    )
-
-    print(
-        f"Entry price     : "
-        f"{entry_price}"
-    )
-
-    print(
-        f"Target +1%      : "
-        f"{target_price}"
-    )
-
-    print(
-        f"Estimated value : "
-        f"{sell_value:.4f} USDT"
-    )
-
-    print(
-        f"Fee reserve     : "
-        f"{available_qty - max_sell_qty:.8f} {coin}"
-    )
-
+    print(f"Symbol          : {symbol}")
+    print(f"Available       : {available_qty} {coin}")
+    print(f"Qty SELL        : {sell_qty} {coin}")
+    print(f"Order type      : {order_type.upper()}")
+    print(f"Best bid        : {best_bid}")
+    if order_type == "limit":
+        print(f"Limit price     : {order_price}")
+    print(f"Estimated value : {sell_value:.6f} USDT")
+    print(f"Minimum order   : {sym_info['min_trade_usdt']} USDT")
     print("=" * 55)
+
+    if sell_value < sym_info["min_trade_usdt"]:
+        print(
+            f"❌ Nilai order {sell_value:.6f} USDT "
+            f"di bawah minimum {sym_info['min_trade_usdt']} USDT"
+        )
+        return
 
     # --------------------------------------------------------
     # MINIMUM ORDER
@@ -732,7 +770,8 @@ def main():
     # --------------------------------------------------------
 
     confirm = input(
-        "\n🚨 SELL MAX QTY +1%? (y/n): "
+        f"\n🚨 Konfirmasi SELL {sell_qty} {coin} "
+        f"({order_type.upper()})? (y/n): "
     ).strip().lower()
 
     if confirm != "y":
@@ -747,17 +786,15 @@ def main():
     # PLACE SELL
     # --------------------------------------------------------
 
-    print(
-        "\n🚀 Place SELL limit @ +1% ..."
-    )
+    print(f"\n🚀 Place SELL {order_type.upper()} ...")
 
     result = place_order(
         api,
         symbol=symbol,
         side="sell",
-        order_type="limit",
-        size=max_sell_qty,
-        price=target_price,
+        order_type=order_type,
+        size=sell_qty,
+        price=order_price,
         force="gtc",
     )
 
