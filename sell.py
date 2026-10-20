@@ -200,6 +200,35 @@ def public_get(path, params=None):
         print(f"❌ Request error: {e}")
 
         return None
+def get_best_bid(symbol):
+
+    data = public_get(
+        "/api/v2/spot/market/orderbook",
+        {
+            "symbol": symbol,
+            "limit": "1"
+        }
+    )
+
+    if not data:
+        return None
+
+    bids = data.get("bids", [])
+
+    if not bids:
+        return None
+
+    try:
+        price = float(bids[0][0])
+
+        if price <= 0:
+            return None
+
+        return price
+
+    except (ValueError, TypeError, IndexError):
+        print("❌ Format data best bid tidak valid")
+        return None
 
 
 # ============================================================
@@ -750,20 +779,7 @@ def main():
         )
         return
 
-    # --------------------------------------------------------
-    # MINIMUM ORDER
-    # --------------------------------------------------------
 
-    if sell_value < sym_info["min_trade_usdt"]:
-
-        print(
-            f"\n❌ SELL value "
-            f"{sell_value:.4f} USDT "
-            f"< minimum "
-            f"{sym_info['min_trade_usdt']} USDT"
-        )
-
-        return
 
     # --------------------------------------------------------
     # CONFIRM
