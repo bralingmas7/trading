@@ -2,6 +2,7 @@
 #!/usr/bin/env python3
 
 import requests
+from datetime import datetime, timezone
 
 from rich.console import Console
 from rich.table import Table
