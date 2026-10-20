@@ -60,11 +60,7 @@ def get_day_stats(symbol):
     if not candles:
         raise RuntimeError("Data candle UTC hari ini kosong")
 
-    return {
-        "low": min(float(candle[3]) for candle in candles),
-        "high": max(float(candle[2]) for candle in candles),
-        "change": float(ticker["changeUtc24h"]) * 100,
-    }
+
 
 
 def get_candles(symbol, limit=24):
