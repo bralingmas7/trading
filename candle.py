@@ -30,27 +30,7 @@ def get_candles(symbol, limit=24):
         raise RuntimeError(result.get("msg", "API error"))
 
     return result.get("data", [])
-def get_day_stats(symbol):
-    url = f"{BASE_URL}/api/v2/spot/market/tickers"
 
-    response = requests.get(
-        url,
-        params={"symbol": symbol},
-        timeout=15
-    )
-    response.raise_for_status()
-
-    result = response.json()
-
-    if result.get("code") != "00000":
-        raise RuntimeError(result.get("msg", "Ticker API error"))
-
-    data = result.get("data", [])
-
-    if not data:
-        raise RuntimeError(f"Ticker {symbol} tidak ditemukan")
-
-    ticker = data[0]
 
 
 
