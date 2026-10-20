@@ -52,11 +52,7 @@ def get_day_stats(symbol):
 
     ticker = data[0]
 
-    return {
-        "low": float(ticker["low24h"]),
-        "high": float(ticker["high24h"]),
-        "change": float(ticker["change24h"]) * 100,
-    }
+
 
 
 def main():
@@ -80,6 +76,19 @@ def main():
 
 
 
+        day_color = "green" if day["change"] >= 0 else "red"
+
+        table = Table(
+            title=(
+                f"{symbol} | Candle 1 Jam\n"
+                f"Low 24h: {day['low']:.8f} | "
+                f"High 24h: {day['high']:.8f} | "
+                f"[{day_color}]Perubahan 24h: "
+                f"{day['change']:+.2f}%[/{day_color}]"
+            ),
+            box=box.SIMPLE_HEAVY,
+            header_style="bold cyan"
+        )
         table.add_column("Waktu", style="white")
         table.add_column("Open", justify="right")
         table.add_column("Close", justify="right")
