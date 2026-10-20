@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 
 import requests
-from datetime import datetime
+
 from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt
@@ -10,6 +10,60 @@ from rich import box
 
 BASE_URL = "https://api.bitget.com"
 console = Console()
+def get_day_stats(symbol):
+    url = f"{BASE_URL}/api/v2/spot/market/tickers"
+
+    response = requests.get(
+        url,
+        params={"symbol": symbol},
+        timeout=15
+    )
+    response.raise_for_status()
+    result = response.json()
+
+    if result.get("code") != "00000":
+        raise RuntimeError(result.get("msg", "Ticker API error"))
+
+    data = result.get("data", [])
+    if not data:
+        raise RuntimeError(f"Ticker {symbol} tidak ditemukan")
+
+    ticker = data[0]
+
+    utc_now = datetime.now(timezone.utc)
+    utc_midnight = utc_now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    candle_url = f"{BASE_URL}/api/v2/spot/market/candles"
+    candle_response = requests.get(
+        candle_url,
+        params={
+            "symbol": symbol,
+            "granularity": "1h",
+            "startTime": str(int(utc_midnight.timestamp() * 1000)),
+            "endTime": str(int(utc_now.timestamp() * 1000)),
+            "limit": "24",
+        },
+        timeout=15
+    )
+    candle_response.raise_for_status()
+    candle_result = candle_response.json()
+
+    if candle_result.get("code") != "00000":
+        raise RuntimeError(
+            candle_result.get("msg", "Candle API error")
+        )
+
+    candles = candle_result.get("data", [])
+    if not candles:
+        raise RuntimeError("Data candle UTC hari ini kosong")
+
+    return {
+        "low": min(float(candle[3]) for candle in candles),
+        "high": max(float(candle[2]) for candle in candles),
+        "change": float(ticker["changeUtc24h"]) * 100,
+    }
 
 
 def get_candles(symbol, limit=24):
